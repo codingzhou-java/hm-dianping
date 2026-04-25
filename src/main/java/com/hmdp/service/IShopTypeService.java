@@ -15,5 +15,10 @@ import java.util.List;
  */
 public interface IShopTypeService extends IService<ShopType> {
 
+    /**
+     * 查询店铺类型列表（带缓存）
+     * @return 店铺类型列表
+     */
+    List<ShopType> queryTypeList();
 
 }
