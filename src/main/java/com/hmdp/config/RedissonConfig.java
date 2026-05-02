@@ -1,4 +1,4 @@
-package com.hmdp.utils;
+package com.hmdp.config;
 
 import org.redisson.Redisson;
 import org.redisson.api.RedissonClient;
@@ -17,15 +17,24 @@ public class RedissonConfig {
     @Value("${spring.redis.password}")
     private String password;
     @Value("${spring.redis.database}")
-    private int database;
+    private String database;
 
     @Bean
     public RedissonClient redissonClient(){
         Config config = new Config();
         String address = "redis://" + host + ":" + port;
+        int dataBase = Integer.parseInt(database);
         config.useSingleServer().setAddress(address)
-                .setDatabase(database)
+                .setDatabase(dataBase)
                 .setPassword(password);
+/*                // 设置连接池大小
+                .setConnectionPoolSize(10)
+                .setConnectionMinimumIdleSize(5)
+                // 设置超时时间
+                .setConnectTimeout(10000)
+                .setTimeout(3000)
+                .setRetryAttempts(3)
+                .setRetryInterval(1500);*/
         return Redisson.create(config);
     }
 

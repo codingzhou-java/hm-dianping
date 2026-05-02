@@ -1,44 +1,35 @@
 package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.Result;
-import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
-import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.springframework.aop.framework.AopContext;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.connection.stream.*;
-import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
  * <p>
- *  服务实现类
+ * 服务实现类
  * </p>
  *
  * @author 虎哥
@@ -71,6 +62,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @PostConstruct
     private void init() {
+        // 创建消费者组，如果不存在则创建
+        try {
+            stringRedisTemplate.opsForStream().createGroup("stream.orders", "g1");
+        } catch (Exception e) {
+            // 消费者组已存在，忽略异常
+            log.info("消费者组已存在或创建失败: {}", e.getMessage());
+        }
         SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
     }
 
@@ -78,14 +76,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         @Override
         public void run() {
-    // 无限循环，用于持续处理订单消息
             while (true) {
                 try {
                     // 1.获取消息队列中的订单信息 XREADGROUP GROUP g1 c1 COUNT 1 BLOCK 2000 STREAMS s1 >
                     List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
-                            Consumer.from("g1", "c1"),//消费者组 + 消费者
-                            StreamReadOptions.empty().count(1).block(Duration.ofSeconds(2)),//读取数量 + 阻塞时间
-                            StreamOffset.create("stream.orders", ReadOffset.lastConsumed())//从哪个位置开始读取
+                            Consumer.from("g1", "c1"),
+                            StreamReadOptions.empty().count(1).block(Duration.ofSeconds(2)),
+                            StreamOffset.create("stream.orders", ReadOffset.lastConsumed())
                     );
                     // 2.判断订单信息是否为空
                     if (list == null || list.isEmpty()) {
@@ -107,7 +104,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             }
         }
 
-        // 处理pending-list中的订单信息--解决消息丢失问题
         private void handlePendingList() {
             while (true) {
                 try {
@@ -155,7 +151,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
     }*/
 
-    public void createVoucherOrder(VoucherOrder voucherOrder) {
+    private void createVoucherOrder(VoucherOrder voucherOrder) {
         Long userId = voucherOrder.getUserId();
         Long voucherId = voucherOrder.getVoucherId();
         // 创建锁对象
@@ -205,8 +201,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 1.执行lua脚本
         Long result = stringRedisTemplate.execute(
                 SECKILL_SCRIPT,
-                Collections.emptyList(),//keys
-                voucherId.toString(), userId.toString(), String.valueOf(orderId)//args
+                Collections.emptyList(),
+                voucherId.toString(), userId.toString(), String.valueOf(orderId)
         );
         int r = result.intValue();
         // 2.判断结果是否为0
@@ -267,6 +263,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             // 库存不足
             return Result.fail("库存不足！");
         }
+
         return createVoucherOrder(voucherId);
     }
 
